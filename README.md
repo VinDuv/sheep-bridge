@@ -1,18 +1,18 @@
 # Sheep Bridge
 
-The SheepShaver and Basilisk II classic Mac emulators provide a simple way to create a
-network between two virtual machines: UDP encapsulation.
+The SheepShaver and Basilisk II classic Mac emulators implement a simple, UDP-based
+network protocol that allows two virtual machines to communicate. Sheep Bridge allows
+a physical, Linux-based machine to communicate with the virtual machines using a TAP
+interface.
 
-Sheep Bridge allows a physical machine to join the network. It can then provide Internet
-access to the virtual machines, or other services like AppleTalk.
+This allows the Linux machine to provide Internet access to the virtual machines, or
+other services like AppleTalk.
 
 ## Requirements
 
-A Linux machine with Python 3. Sheep Bridge should be easily portable to other Unix
-systems with TAP network interfaces; patches welcome ;-) It may also be possible to
-make it run under Python 2 with some small modifications.
+A Linux machine with Python 3.
 
-## How to use it
+## General usage
 
 Let’s suppose you have two machines on the `192.168.1.0/24` network:
  - `192.168.1.2` will run Sheep Bridge
@@ -39,71 +39,89 @@ Sheep Bridge needs to be started as root in order to create the TAP interface. I
 drop its privileges once it’s done. You should now have a `sheep_bridge` Ethernet
 interface.
 
-### IP configuration
-
-You can assign an IP and netmask to the `sheep_bridge` interface. Do *not* use a network
-that would conflict with you physical network, or chaos may ensue.
-
-For instance, you can configure IP `10.42.42.1/24` on the interface with:
+You can assign an IP and netmask to the `sheep_bridge` interface. (Do not use a
+network range already used on your network). For instance:
 ```
-# ifconfig sheep_bridge 10.42.42.1 netmask 255.255.255.0 up
+# ip addr add 10.42.42.1/24 dev sheep_bridge
+# ip link set sheep_bridge up
 ```
 
-Alternatively, you can configure your distro’s network config tool so it sets up the
-interface when Sheep Bridge is started. For instance, on Debian, you can add the
-following lines to `/etc/network/interfaces`:
+Configure Mac OS in your Sheep Shaver/Basilisk II to use an address on the same network
+(for instance `10.42.42.2`) and you should be able to communicate between the machines.
+
+### `systemd` integration
+
+Sheep Bridge can be used with `systemd`:
+
+ - Copy `sheep-bridge.defaults` to `/etc/default/sheep-bridge` and edit the `NET_ADDR`
+   and `PORT` parameters.
+ - Copy `sheep-bridge.service` to `/etc/systemd/system/sheep-bridge.service`.
+ - Copy `sheep_bridge.py` to `/usr/local/sbin/sheep_bridge.py`.
+ - Run `systemctl enable sheep-bridge` and `systemctl start sheep-bridge` as root.
+
+Sheep Bridge will be started before network configuration tools, so you can use them
+to configure the `sheep_bridge` interface the same way physical network interfaces
+are configured.
+
+For instance, on Debian, you can use the following configuration in
+`/etc/network/interfaces`:
 
 ```
 allow-hotplug sheep_bridge
 iface sheep_bridge inet static
 	address 10.42.42.1
 	netmask 255.255.255.0
-	pre-up sysctl -w net.ipv6.conf.$IFACE.disable_ipv6=1
 ```
 
-(the `pre-up` line is not strictly necessary, but will avoid unnecessary IPv6 traffic
-on the virtual network; after all, most OSes that can run in SheepShaver and Basilisk II
-are not IPv6-compatible…)
-
-Now, you can start the virtual machine and set its IP in the MacTCP or TCP/IP control
-panel (for instance, `10.42.42.2`, netmask `255.255.255.0`). You should be able to ping
-the Sheep Brige machine:
-
-![TCP/IP control panel and MacTCP Ping](https://www.duvert.net/images/sheep_bridge_01.png)
-
 You can also install a DHCP server on the Sheep Bridge machine and use it to assign
-addresses to the virtual machines. (The VMs will need System 7 or newer and Open
-Transport, I believe)
+addresses to the virtual machines.
 
 ### Internet access
 
-Now that the IP addresses are configured, you can share the network connection on, say,
-the `eth0` interface of the Sheep Bridge machine and the virtual machines with:
-```
-# echo 1 > /proc/sys/net/ipv4/ip_forward
-# iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-```
+You can configure Internet sharing to allow the virtual machines to access the Internet.
+See your distribution’s documentation for details. It usually boils down to:
 
-The virtual machines should now be able to access the Internet.
+ - Enable IP forwarding (`net.ipv4.ip_forward=1` in `/etc/sysctl.conf` or equivalent)
+ - Enable masquerading (`iptables -t nat -A POSTROUTING -j MASQUERADE`)
 
 ### AppleTalk
 
-If `netatalk` is installed on the Sheep Bridge machine, you can use it to share files
-via AppleTalk with the virtual machines. IP configuration (see above) is not necessary,
-but you will still need to bring the `sheep_bridge` interface up before starting the
-`netatalk` daemons. Netatalk also needs to be configured to use AFP over AppleTalk,
-which is disabled by default (hint: use `-ddp` or `-transall` in `afpd.conf` and make sure
-the `atalkd` daemon is enabled).
+The `netatalk` v2 (not v3) tools can be used to share files between the virtual machines
+and the Linux host.
 
-You need to configure `atalkd.conf` so that it uses the `sheep_bridge` interface. Once
-it’s done, the virtual machines should be able to access the AppleShare file server.
+ - This requires support for the AppleTalk protocol in the Linux kernel. It is generally
+   available, but there are some caveats (see [this gist](
+   https://gist.github.com/VinDuv/4db433b6dce39d51a5b7847ee749b2a4) for details)
+ - Make sure that the `sheep_bridge` interface is enabled (up) on boot (no need to
+   assign it an IP address, though)
+ - The `atalkd` daemon must be enabled, and must be configured to use the `sheep_bridge`
+   interface.
+ - The `afpd` daemon must be configured to allow file sharing over AppleTalk (use
+   `-ddp` or `-transall` in `afpd.conf`)
+ - AppleTalk routing can be used to allow communication between SheepShaver/Basilisk II
+   and physical Mac computers. Configure `atalkd` to configure routing between the
+   `sheep_bridge` interface, and the interface whose Macs are connected to.
+   Unfortunately, there is an issue with Linux’s AppleTalk implementation that will
+   prevent router discovery from working properly unless you recompile the kernel; see
+   the aforementioned gist for more info.
 
-If you have old Macs on your physical network, you should be able to make netatalk serve
-files to both them and the virtual machines, and even route AppleTalk packet between
-the two networks (so your VM can access a file share on a physical Mac and vice-versa). I
-haven’t been able to find a working configuration for this, however.
+### Network issues
 
-## TODO
- * `systemd` service support, to be able to start sheep_bridge at system startup
- * Ability to use a persistent TAP interface to avoid having to start the service as root
+Sheep Bridge perform checks on packets received from the VMs, and packets received on the
+virtual Ethernet interface, before transmitting them.
 
+ - Packets sent to multicast destinations are disallowed, with the exception of the
+   standard broadcast address (`FF:FF:FF:FF:FF:FF`) and the AppleTalk broadcast address
+   (`09:00:07:FF:FF:FF`). IPv6 auto-configuration packets are silently dropped if they
+   are sent on the virtual Ethernet interface.
+ - SheepShaver/Basilisk II VMs (and Sheep Bridge) use local MAC addresses that are
+   derived from the host computer’s IP address. Sheep Bridge checks the coherency between
+   MAC addresses and IP addresses before forwarding a packet. Unfortunately,
+   SheepShaver/Basilisk II may use incoherent addresses if the computer it’s running on
+   has multiple interfaces active at the same time (for instance, Ethernet and Wi-Fi).
+   In that case, you will have to disable one of the interfaces and try again.
+
+When an unexpected/invalid packet is received, Sheep Bridge will log a message on the
+standard output, so you can directly debug issues if you started it manually. If it is
+started using `systemd`, the output will usually be redirected to `journal` or the 
+`/var/log/syslog` file.

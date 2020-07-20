@@ -1,0 +1,13 @@
+# /etc/default/sheep-bridge: Configuration variables for sheep-bridge
+
+# Network address to listen on; must be a local IP address that this machine
+# has, followed by a slash and a network mask.
+# Ex: 192.168.1.25/24
+# Note that if that address is incorrect, sheep-bridge will start up anyway
+# but the virtual interface will not be functional.
+NET_ADDR=""
+
+# Network port used by the SheepShaver/Basilisk II emulators on the network to
+# communicate.
+PORT=6066
+

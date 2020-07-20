@@ -1,0 +1,12 @@
+[Unit]
+Description=Sheep Bridge virtual interface
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+EnvironmentFile=/etc/default/sheep-bridge
+ExecStart=/usr/local/sbin/sheep_bridge.py "$NET_ADDR" "$PORT"
+Type=notify
+
+[Install]
+WantedBy=multi-user.target
